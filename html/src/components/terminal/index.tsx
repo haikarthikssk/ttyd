@@ -83,6 +83,24 @@ export class Xterm extends Component<Props> {
         this.openTerminal();
         this.connect();
 
+        this.terminal.attachCustomKeyEventHandler((event:KeyboardEvent)=>{
+            if(event.ctrlKey && event.key=='v')
+            {
+                document.execCommand('paste');
+                return false;
+            }
+            return true;
+        })
+
+        this.terminal.attachCustomKeyEventHandler((event:KeyboardEvent)=>{
+            if(event.ctrlKey && event.key=='c')
+            {
+                document.execCommand('copy');
+                return false;
+            }
+            return true;
+        })
+
         window.addEventListener('resize', this.onWindowResize);
         window.addEventListener('beforeunload', this.onWindowUnload);
     }
