@@ -1,6 +1,6 @@
 import { bind } from 'decko';
 import { Component, h } from 'preact';
-import { ITerminalOptions, Terminal } from 'xterm';
+import { ITerminalOptions, RendererType, Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebglAddon } from 'xterm-addon-webgl';
 import { WebLinksAddon } from 'xterm-addon-web-links';
@@ -210,6 +210,7 @@ export class Xterm extends Component<Props> {
             });
         }
         terminal.open(container);
+        fitAddon.fit();
     }
 
     @bind
@@ -225,55 +226,38 @@ export class Xterm extends Component<Props> {
     }
 
     @bind
-    private setRendererType(value: string) {
-        const isWebGL2Available = () => {
-            try {
-                const canvas = document.createElement('canvas');
-                return !!(window.WebGL2RenderingContext && canvas.getContext('webgl2'));
-            } catch (e) {
-                return false;
-            }
-        };
-
-        const isSafari = () => {
-            // https://stackoverflow.com/questions/9847580
-            if (/constructor/i.test(String(window["HTMLElement"]))) {
-                return true;
-            }
-            if (!window.top["safari"]) {
-                return false;
-            }
-            return String(window.top["safari"].pushNotification) === "[object SafariRemoteNotification]";
-        };
-
-        const isIos = () => {
-            // https://stackoverflow.com/questions/9038625
-            // https://github.com/lancedikson/bowser/issues/329
-            return !!navigator.platform && (
-                /iPad|iPhone|iPod/.test(navigator.platform)
-                || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1 && !window["MSStream"])
-            );
-        };
-
+    private setRendererType(value: 'webgl' | RendererType) {
         const { terminal } = this;
+
+        const disposeWebglRenderer = () => {
+            try {
+                this.webglAddon?.dispose();
+            } catch {
+                // ignore
+            }
+            this.webglAddon = undefined;
+        };
+
         switch (value) {
             case 'webgl':
                 if (this.webglAddon) return;
-                if (isWebGL2Available() && !isSafari() && !isIos()) {
-                    this.webglAddon = new WebglAddon();
-                    terminal.loadAddon(this.webglAddon);
-                    console.log(`[ttyd] WebGL renderer enabled`);
+                try {
+                    if (window.WebGL2RenderingContext && document.createElement('canvas').getContext('webgl2')) {
+                        this.webglAddon = new WebglAddon();
+                        this.webglAddon.onContextLoss(() => {
+                            disposeWebglRenderer();
+                        });
+                        terminal.loadAddon(this.webglAddon);
+                        console.log(`[ttyd] WebGL renderer enabled`);
+                    }
+                } catch (e) {
+                    console.warn(`[ttyd] webgl2 init error`, e);
                 }
                 break;
             default:
-                try {
-                    this.webglAddon?.dispose();
-                } catch {
-                    // ignore
-                }
-                this.webglAddon = undefined;
+                disposeWebglRenderer();
                 console.log(`[ttyd] option: rendererType=${value}`);
-                terminal.setOption('rendererType', value);
+                terminal.options.rendererType = value;
                 break;
         }
     }
@@ -313,8 +297,12 @@ export class Xterm extends Component<Props> {
                     document.title = value;
                     break;
                 default:
-                    console.log(`[ttyd] option: ${key}=${value}`);
-                    terminal.setOption(key, value);
+                    console.log(`[ttyd] option: ${key}=${JSON.stringify(value)}`);
+                    if (terminal.options[key] instanceof Object) {
+                        terminal.options[key] = Object.assign({}, terminal.options[key], value);
+                    } else {
+                        terminal.options[key] = value;
+                    }
                     if (key.indexOf('font') === 0) fitAddon.fit();
                     break;
             }
@@ -343,7 +331,6 @@ export class Xterm extends Component<Props> {
             overlayAddon.showOverlay('Reconnected', 300);
         } else {
             this.opened = true;
-            fitAddon.fit();
         }
 
         this.doReconnect = this.reconnect;
@@ -410,7 +397,7 @@ export class Xterm extends Component<Props> {
     @bind
     private onTerminalResize(size: { cols: number; rows: number }) {
         const { overlayAddon, socket, textEncoder, resizeOverlay } = this;
-        if (socket.readyState === WebSocket.OPEN) {
+        if (socket && socket.readyState === WebSocket.OPEN) {
             const msg = JSON.stringify({ columns: size.cols, rows: size.rows });
             socket.send(textEncoder.encode(Command.RESIZE_TERMINAL + msg));
         }
